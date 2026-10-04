@@ -28,10 +28,10 @@ def test_postgres_has_fts_index_if_postgres(session):
 
     from sqlalchemy import text
 
-    found = session.execute(
+    result = await session.execute(
         text("SELECT indexname FROM pg_indexes WHERE indexname = 'ix_anime_title_fts'")
-    ).scalar()
-    assert found == "ix_anime_title_fts", "GIN-индекс полнотекстового поиска не создан миграцией"
+    )
+    assert result.scalar() == "ix_anime_title_fts", "GIN-индекс полнотекстового поиска не создан миграцией"
 
 
 def test_postgres_tables_exist_if_postgres(session):
@@ -40,9 +40,8 @@ def test_postgres_tables_exist_if_postgres(session):
 
     from sqlalchemy import text
 
-    tables = set(
-        session.execute(
-            text("SELECT tablename FROM pg_tables WHERE schemaname = 'public'")
-        ).scalars()
+    result = await session.execute(
+        text("SELECT tablename FROM pg_tables WHERE schemaname = 'public'")
     )
+    tables = set(result.scalars())
     assert {"anime", "anime_links", "sync_runs"} <= tables

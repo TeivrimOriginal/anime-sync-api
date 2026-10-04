@@ -12,16 +12,18 @@ from typing import Any
 from sqlalchemy import or_, text
 
 # GIN-индекс создаётся только на PostgreSQL.
-PG_TSVECTOR_INDEX_SQL = (
-    "CREATE INDEX IF NOT EXISTS ix_anime_title_fts "
-    "ON anime USING GIN (to_tsvector('simple', "
-    "coalesce(title, '') || ' ' || coalesce(title_romaji, '')))"
+# Выражение индекса и выражение поиска обязаны совпадать, иначе индекс
+# не будет использоваться планировщиком.
+PG_TSVECTOR_EXPR = (
+    "to_tsvector('simple', coalesce(title, '') || ' ' || "
+    "coalesce(title_romaji, '') || ' ' || coalesce(genres, ''))"
 )
 
-PG_SEARCH_SQL = (
-    "to_tsvector('simple', coalesce(title, '') || ' ' || coalesce(title_romaji, '')) "
-    "@@ plainto_tsquery('simple', :q)"
+PG_TSVECTOR_INDEX_SQL = (
+    f"CREATE INDEX IF NOT EXISTS ix_anime_title_fts ON anime USING GIN ({PG_TSVECTOR_EXPR})"
 )
+
+PG_SEARCH_SQL = PG_TSVECTOR_EXPR + " @@ plainto_tsquery('simple', :q)"
 
 
 def dialect_name(bind: Any) -> str:

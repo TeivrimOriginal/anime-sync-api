@@ -84,11 +84,14 @@ def upgrade() -> None:
     op.create_index("ix_sync_runs_source_started", "sync_runs", ["source", "started_at"])
 
     # Полнотекстовый индекс только на PostgreSQL: GIN поверх tsvector.
+    # Выражение обязано совпадать с app.search.PG_SEARCH_SQL, иначе индекс
+    # не будет использоваться планировщиком запросов.
     if op.get_bind().dialect.name == "postgresql":
         op.execute(
             "CREATE INDEX IF NOT EXISTS ix_anime_title_fts ON anime USING GIN "
             "(to_tsvector('simple', "
-            "coalesce(title, '') || ' ' || coalesce(title_romaji, '')))"
+            "coalesce(title, '') || ' ' || coalesce(title_romaji, '') || ' ' || "
+            "coalesce(genres, '')))"
         )
 
 
