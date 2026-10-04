@@ -1,0 +1,96 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: anime
+          POSTGRES_PASSWORD: anime
+          POSTGRES_DB: anime_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U anime -d anime_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql+asyncpg://anime:anime@localhost:5432/anime_test
+      ALEMBIC_DATABASE_URL: postgresql+psycopg://anime:anime@localhost:5432/anime_test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Установить зависимости
+        run: pip install -r requirements-dev.txt
+
+      - name: Убедиться, что PostgreSQL отвечает
+        run: |
+          python - <<'EOF'
+          import os, socket, time
+          host, port = "localhost", 5432
+          for attempt in range(30):
+              try:
+                  with socket.create_connection((host, port), timeout=2):
+                      print(f"postgres доступен на {host}:{port}")
+                      break
+              except OSError:
+                  time.sleep(1)
+          else:
+              raise SystemExit("postgres не поднялся")
+          EOF
+
+      - name: Накатить миграции
+        run: |
+          alembic upgrade head
+          python - <<'EOF'
+          import os
+          from sqlalchemy import create_engine, text
+          url = os.environ["ALEMBIC_DATABASE_URL"]
+          with create_engine(url).connect() as c:
+              tables = c.execute(text(
+                  "SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY 1"
+              )).scalars().all()
+              print("таблицы:", tables)
+              fts = c.execute(text(
+                  "SELECT indexname FROM pg_indexes WHERE indexname='ix_anime_title_fts'"
+              )).scalars().all()
+              print("GIN-индекс полнотекстового поиска:", fts)
+              assert "anime" in tables and "sync_runs" in tables, "миграция не создала таблицы"
+              assert fts, "GIN-индекс не создан"
+              print("PostgreSQL подтверждён: схема и GIN-индекс на месте")
+          EOF
+
+      - name: Тесты на PostgreSQL
+        run: pytest -v
+
+      - name: Тесты на SQLite
+        env:
+          DATABASE_URL: sqlite+aiosqlite:///./ci_sqlite.db
+          ALEMBIC_DATABASE_URL: sqlite:///./ci_sqlite.db
+        run: pytest -v
+
+      - name: Ruff
+        run: |
+          pip install ruff==0.14.0
+          ruff check app tests alembic
+
+      - name: Убрать за собой
+        if: always()
+        run: rm -f ci_sqlite.db
