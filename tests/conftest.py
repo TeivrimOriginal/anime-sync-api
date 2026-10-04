@@ -1,6 +1,17 @@
-"""Фикстуры pytest: отдельная БД на каждый прогон, без внешних сервисов."""
+"""Фикстуры pytest.
+
+БД выбирается из переменной DATABASE_URL:
+- если она указывает на PostgreSQL (в CI это сервис-контейнер), тесты идут
+  против настоящего сервера;
+- иначе используется SQLite в памяти, чтобы набор можно было гонять
+  без установленного PostgreSQL.
+
+Брать SQLite «на автомате» нельзя: тогда шаг CI с названием «Тесты на PostgreSQL»
+тестировал бы SQLite и проверка была бы фикцией.
+"""
 from __future__ import annotations
 
+import os
 from collections.abc import AsyncIterator
 
 import pytest_asyncio
@@ -10,15 +21,23 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from app.db import Base, get_session
 from app.main import app
 
-TEST_DB_URL = "sqlite+aiosqlite:///:memory:"
+DEFAULT_TEST_DB_URL = "sqlite+aiosqlite:///:memory:"
+
+
+def test_db_url() -> str:
+    return os.environ.get("DATABASE_URL") or DEFAULT_TEST_DB_URL
 
 
 @pytest_asyncio.fixture
 async def engine():
-    """Движок на SQLite в памяти: база живёт ровно один тест."""
-    test_engine = create_async_engine(
-        TEST_DB_URL, connect_args={"check_same_thread": False}, future=True
-    )
+    """Движок тестовой БД: схема создаётся на каждый прогон."""
+    url = test_db_url()
+    kwargs: dict = {"future": True}
+    if url.startswith("sqlite"):
+        kwargs["connect_args"] = {"check_same_thread": False}
+
+    test_engine = create_async_engine(url, **kwargs)
+
     async with test_engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
     yield test_engine

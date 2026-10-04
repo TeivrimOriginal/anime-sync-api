@@ -77,7 +77,7 @@ jobs:
               print("PostgreSQL подтверждён: схема и GIN-индекс на месте")
           EOF
 
-      - name: Тесты на PostgreSQL
+      - name: Тесты на PostgreSQL 16 (DATABASE_URL указывает на сервис-контейнер)
         run: pytest -v
 
       - name: Тесты на SQLite
