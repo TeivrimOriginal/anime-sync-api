@@ -30,7 +30,7 @@ def test_db_url() -> str:
 
 @pytest_asyncio.fixture
 async def engine():
-    """Движок тестовой БД: схема создаётся на каждый прогон."""
+    """Движок тестовой БД: схема создаётся один раз на прогон."""
     url = test_db_url()
     kwargs: dict = {"future": True}
     if url.startswith("sqlite"):
@@ -44,8 +44,36 @@ async def engine():
     await test_engine.dispose()
 
 
+async def _clean(engine) -> None:
+    """Очищает таблицы перед каждым тестом.
+
+    На SQLite в памяти база и так новая на каждый тест, но на PostgreSQL это
+    общий сервер: без очистки данные прошлого теста протекают в следующий, и
+    падают проверки вроде «после двух вставок их ровно две». Заметно только
+    на сервере, поэтому очистка обязательна, а не косметика.
+    """
+    from sqlalchemy import text
+
+    url = test_db_url()
+    if url.startswith("postgresql"):
+        statements = (
+            "TRUNCATE TABLE anime_links, sync_runs, anime RESTART IDENTITY CASCADE",
+        )
+    else:
+        statements = (
+            "DELETE FROM anime_links",
+            "DELETE FROM sync_runs",
+            "DELETE FROM anime",
+        )
+
+    async with engine.begin() as connection:
+        for statement in statements:
+            await connection.execute(text(statement))
+
+
 @pytest_asyncio.fixture
 async def session(engine) -> AsyncIterator[AsyncSession]:
+    await _clean(engine)
     factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     async with factory() as db_session:
         yield db_session
